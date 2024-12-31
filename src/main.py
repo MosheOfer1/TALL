@@ -9,7 +9,7 @@ from transformers import AutoTokenizer, MarianMTModel, MarianTokenizer, AutoMode
 
 from model import CustomLLM
 from dataset import create_dataloaders
-from training import train_llm
+from train_model import train_llm
 from utils import evaluate_text, calculate_metrics
 from auto_encoder import DimensionAlignmentAutoencoder, AutoencoderPreTrainer
 
