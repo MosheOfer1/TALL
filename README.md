@@ -34,7 +34,7 @@
 1. **Evaluating NLP Models**
    To evaluate your models on a test dataset:
    ```bash
-   python evaluator.py --test-file data/test_sentences.txt \
+   python src/evaluator.py --test-file data/test_sentences.txt \
     --log-dir logs \
     --output-file results/model_comparison.csv \
     --device cuda \
@@ -47,7 +47,7 @@
 2. **Training Custom LLM Models**:
    To train a new model with autoencoders:
     ```bash
-    python train_model.py --data-file data/train_sentences.txt \
+    python src/main.py --data-file data/train_sentences.txt \
     --device cuda \
     --he-en-model Helsinki-NLP/opus-mt-tc-big-he-en \
     --en-he-model Helsinki-NLP/opus-mt-en-he \
@@ -64,7 +64,7 @@
 3. **Generating Predictions**:
   To interactively generate predictions:
     ```bash
-    python train_model.py --generate \
+    python src/main.py --generate \
     --he-en-model Helsinki-NLP/opus-mt-tc-big-he-en \
     --en-he-model Helsinki-NLP/opus-mt-en-he \
     --llm-model facebook/opt-350m
