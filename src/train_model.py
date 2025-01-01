@@ -282,7 +282,7 @@ class Trainer:
 
     def load_checkpoint(self, checkpoint_path):
         self.logger.info(f"Loading checkpoint from {checkpoint_path}")
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.start_epoch = checkpoint['epoch'] + 1
         self.best_eval_loss = checkpoint['loss']

@@ -3,6 +3,7 @@ from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 import os
+import matplotlib.pyplot as plt
 
 
 class DimensionAlignmentAutoencoder(nn.Module):
@@ -358,7 +359,6 @@ class AutoencoderPreTrainer:
 
     def plot_losses(self, save_dir):
         """Plot training and validation losses"""
-        import matplotlib.pyplot as plt
 
         # Plot epoch-level losses
         plt.figure(figsize=(10, 6))

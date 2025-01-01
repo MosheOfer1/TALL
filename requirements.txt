@@ -7,3 +7,6 @@ torch==2.5.1
 tqdm==4.67.1
 transformers==4.47.1
 datasets~=3.2.0
+SentencePiece
+sacremoses
+matplotlib~=3.10.0

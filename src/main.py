@@ -147,7 +147,7 @@ def add_autoencoder_args(parser):
                        help='Number of sentences to use from the English dataset')
 
     # Training parameters
-    group.add_argument('--autoencoder_epochs', type=int, default=100,
+    group.add_argument('--autoencoder_epochs', type=int, default=5,
                        help='Number of epochs for autoencoder training')
     group.add_argument('--autoencoder_batch_size', type=int, default=32,
                        help='Batch size for autoencoder training')
