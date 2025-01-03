@@ -241,10 +241,6 @@ class CustomLLM(nn.Module):
         """
         self.eval()
 
-        # Create streamer if not provided
-        if streamer is None:
-            streamer = TextStreamer(tokenizer3)
-
         # Calculate punct_tokens only if not already calculated
         if self.punct_tokens is None:
             self.calculate_punct_tokens(tokenizer3)
@@ -260,8 +256,9 @@ class CustomLLM(nn.Module):
         generated_ids = inputs["input_ids_3"].clone()
         attention_mask3 = inputs["attention_mask_3"].clone()
 
-        # Stream initial tokens
-        streamer.put(generated_ids[0])
+        if streamer is not None:
+            # Stream initial tokens
+            streamer.put(generated_ids[0])
 
         for _ in range(max_length):
             # Forward pass
@@ -315,8 +312,9 @@ class CustomLLM(nn.Module):
             generated_ids = torch.cat([generated_ids, next_token], dim=1)
             attention_mask3 = torch.cat([attention_mask3, torch.ones_like(next_token)], dim=1)
 
-            # Stream the current token
-            streamer.put(generated_ids[0])
+            if streamer is not None:
+                # Stream the current token
+                streamer.put(generated_ids[0])
 
             # Update inputs for next iteration
             current_sentence = tokenizer3.decode(generated_ids[0], skip_special_tokens=True)
@@ -330,8 +328,10 @@ class CustomLLM(nn.Module):
             if next_token.item() == tokenizer3.eos_token_id:
                 break
 
-        # End the streaming
-        streamer.end()
+        if streamer is not None:
+            # End the streaming
+            streamer.end()
+
         return generated_ids
 
     @classmethod

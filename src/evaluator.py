@@ -476,6 +476,37 @@ def get_enabled_approaches(args, he_to_en, en_to_he):
     return approaches
 
 
+def plot_accuracy_curves(approach_metrics, output_path='accuracy_curves.png'):
+    """
+    Plot accuracy curves for each approach.
+
+    Args:
+        approach_metrics: Dictionary containing lists of accuracies for each approach
+        output_path: Path to save the plot
+    """
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(12, 8))
+
+    for approach_name, metrics in approach_metrics.items():
+        # Convert accuracies to percentages
+        accuracies = [acc * 100 for acc in metrics['accuracies']]
+        # Create x-axis points (number of samples processed)
+        x_points = range(1, len(accuracies) + 1)
+
+        plt.plot(x_points, accuracies, label=approach_name, linewidth=2)
+
+    plt.xlabel('Number of Samples Processed')
+    plt.ylabel('Accuracy (%)')
+    plt.title('Model Accuracy Progression')
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.7)
+
+    # Save the plot
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+
 def main():
     args = parse_args()
     setup_logging(args.log_dir)
@@ -499,28 +530,74 @@ def main():
     logger.info(f"Loading test sentences from {args.test_file}")
     sentences = load_sentences(args.test_file)
 
-    # Process sentences with each approach
+    # Initialize results and metrics tracking for each approach
+    approach_results = {approach.__class__.__name__: {'correct': 0, 'total': 0} for approach in approaches}
+    approach_metrics = {
+        approach.__class__.__name__: {
+            'accuracies': [],  # List to store accuracy at each step
+            'correct': 0,
+            'total': 0
+        }
+        for approach in approaches
+    }
+
+    # Create progress bars for each approach
+    progress_bars = {
+        approach.__class__.__name__: tqdm(
+            total=len(sentences),
+            desc=f"{approach.__class__.__name__}: 0.00% accuracy",
+            position=i,
+            leave=True
+        )
+        for i, approach in enumerate(approaches)
+    }
+
+    # Process sentences
     all_results = []
-    for sentence in tqdm(sentences):
+    for sentence in sentences:
         for approach in approaches:
             try:
                 sentence = sentence.replace(".", "")
                 result = approach.process_sentence(sentence)
                 all_results.append(result)
+
+                # Update approach statistics
+                approach_name = approach.__class__.__name__
+                approach_metrics[approach_name]['total'] += 1
+                if result.is_correct:
+                    approach_metrics[approach_name]['correct'] += 1
+
+                # Calculate and store current accuracy
+                current_accuracy = (approach_metrics[approach_name]['correct'] /
+                                  approach_metrics[approach_name]['total'])
+                approach_metrics[approach_name]['accuracies'].append(current_accuracy)
+
+                # Update progress bar
+                progress_bars[approach_name].set_description(
+                    f"{approach_name}: {current_accuracy*100:.2f}% accuracy"
+                )
+                progress_bars[approach_name].update(1)
+
             except Exception as e:
                 logger.error(f"Error processing sentence '{sentence}' with {approach.__class__.__name__}: {str(e)}")
+
+    # Close all progress bars
+    for bar in progress_bars.values():
+        bar.close()
+
+    # Plot accuracy curves
+    logger.info("Generating accuracy plot...")
+    plot_accuracy_curves(approach_metrics)
 
     # Save results
     logger.info(f"Saving results to {args.output_file}")
     save_results(all_results, args.output_file)
 
-    # Calculate and log statistics
-    df = pd.DataFrame([vars(r) for r in all_results])
-    for approach_name in df['approach_name'].unique():
-        approach_results = df[df['approach_name'] == approach_name]
-        accuracy = (approach_results['is_correct'].sum() / len(approach_results)) * 100
-        logger.info(f"{approach_name.capitalize()} Approach Accuracy: {accuracy:.2f}%")
-
+    # Calculate and log final statistics
+    logger.info("\nFinal Results:")
+    for approach_name, metrics in approach_metrics.items():
+        final_accuracy = (metrics['correct'] / metrics['total'] * 100)
+        logger.info(f"{approach_name} Accuracy: {final_accuracy:.2f}%")
 
 if __name__ == "__main__":
     main()
