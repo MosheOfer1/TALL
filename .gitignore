@@ -154,3 +154,9 @@ cython_debug/
 /model_checkpoints
 /logs
 /.idea
+/tall_checkpoints
+/wandb
+/src/prompt_tuning/wandb
+/finetuned-models
+/src/prompt_tuning/llama_word_gen_model
+/src/prompt_tuning/llama_model_176k

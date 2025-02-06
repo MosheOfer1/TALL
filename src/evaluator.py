@@ -75,7 +75,7 @@ class DirectHebrewApproach(BaseCompletionApproach):
             "max_new_tokens": 10,
             "do_sample": True,
             "temperature": 0.7,
-            "pad_token_id": self.tokenizer.pad_token_id,
+            "pad_token_id": self.tokenizer.pad_token_id if self.tokenizer.pad_token_id else self.tokenizer.eos_token_id,
             "eos_token_id": self.tokenizer.encode(" ")[0],  # Use space as EOS token
         }
 
@@ -125,7 +125,7 @@ class NaiveApproach(BaseCompletionApproach):
             "max_new_tokens": 10,  # Limit the number of new tokens
             "do_sample": True,
             "temperature": 0.7,
-            "pad_token_id": self.llm_tokenizer.pad_token_id,
+            "pad_token_id": self.llm_tokenizer.pad_token_id if self.llm_tokenizer.pad_token_id else self.llm_tokenizer.eos_token_id,
             "eos_token_id": self.llm_tokenizer.encode(" ")[0],  # Use space as EOS token
         }
 
@@ -189,7 +189,7 @@ class SoftPromptApproach(BaseCompletionApproach):
             "max_new_tokens": 10,
             "do_sample": True,
             "temperature": 0.7,
-            "pad_token_id": self.tokenizer.pad_token_id,
+            "pad_token_id": self.tokenizer.pad_token_id if self.tokenizer.pad_token_id else self.tokenizer.eos_token_id,
             "eos_token_id": self.tokenizer.encode(" ")[0],  # Use space as EOS token
         }
 
@@ -261,7 +261,7 @@ class FineTunedHebrewApproach(BaseCompletionApproach):
             "max_new_tokens": 10,
             "do_sample": True,
             "temperature": 0.7,
-            "pad_token_id": self.tokenizer.pad_token_id,
+            "pad_token_id": self.tokenizer.pad_token_id if self.tokenizer.pad_token_id else self.tokenizer.eos_token_id,
             "eos_token_id": self.tokenizer.encode(" ")[0],  # Use space as EOS token
         }
 
@@ -269,7 +269,7 @@ class FineTunedHebrewApproach(BaseCompletionApproach):
         completion = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
 
         # Extract the predicted word (everything after the input prompt)
-        predicted_text = completion[len(truncated_sentence):].strip()
+        predicted_text = completion[len(truncated_sentence):].replace(".", " ").replace(",", " ").strip()
         predicted_word = predicted_text.split()[0].replace(",","").replace(".","") if predicted_text else ""
 
         return ModelOutput(

@@ -1,6 +1,6 @@
 import argparse
 import os
-import traceback
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 import torch
 from datasets import load_dataset

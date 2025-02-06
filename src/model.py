@@ -337,7 +337,7 @@ class CustomLLM(nn.Module):
     @classmethod
     def load_pretrained(cls, checkpoint_path, he_en_model, en_he_model, llm_model, device, tokenizer3):
         # Load only the model weights
-        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+        checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=True)
 
         if 'model_state_dict' in checkpoint:
             # This is a checkpoint saved by our Trainer

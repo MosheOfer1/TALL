@@ -34,6 +34,8 @@ fig, ax1 = plt.subplots(figsize=(18, 9))
 # Set background color to light gray for better contrast
 fig.patch.set_facecolor('#f0f0f0')
 ax1.set_facecolor('#f0f0f0')
+# Set y-axis limit for speakers
+ax1.set_ylim(0, 1300)
 
 # Bar widths
 bar_width = 0.4
@@ -57,17 +59,18 @@ ax2.bar([x + bar_width for x in x_positions], filtered_data['Articles (Millions)
         color='#EE6677', alpha=0.7, label='Articles (Millions)', width=bar_width)
 ax2.set_ylabel('Articles (Millions)', color='#EE6677', fontsize=24, labelpad=15)
 ax2.tick_params(axis='y', labelcolor='#EE6677', labelsize=22)
-
+# Set y-axis limit for articles
+ax2.set_ylim(0, 8)
 # Add grid for better readability
 ax1.grid(True, axis='y', alpha=0.3)
 
 # Add title and source
-plt.title('Speakers vs Wikipedia Articles\nby Language',
-          fontsize=30, fontweight='bold', pad=40)
-plt.figtext(0.5, 0.02,
-            'Data represents the total number of first and second language speakers and Wikipedia articles.\nSource: meta.wikimedia.org/wiki/List_of_Wikipedias_by_speakers_per_article',
-            wrap=True, horizontalalignment='center', fontsize=24, color='#666666',
-            fontstyle='italic')
+# plt.title('Speakers vs Wikipedia Articles\nby Language',
+#           fontsize=30, fontweight='bold', pad=40)
+# plt.figtext(0.5, 0.02,
+#             'Data represents the total number of first and second language speakers and Wikipedia articles.\nSource: meta.wikimedia.org/wiki/List_of_Wikipedias_by_speakers_per_article',
+#             wrap=True, horizontalalignment='center', fontsize=24, color='#666666',
+#             fontstyle='italic')
 
 # Add a legend with larger font
 lines1, labels1 = ax1.get_legend_handles_labels()
@@ -79,5 +82,5 @@ ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right',
 fig.tight_layout(rect=[0, 0.07, 1, 0.95])
 
 # Save with higher resolution
-plt.savefig('speakers_vs_articles.png', dpi=500, bbox_inches='tight')
+plt.savefig('speakers_vs_articles.pdf ', format='pdf', bbox_inches='tight')
 plt.show()

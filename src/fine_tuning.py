@@ -7,41 +7,87 @@ from transformers import (
     Trainer,
     DataCollatorForLanguageModeling
 )
-from typing import Dict, List
+from typing import Dict, List, Optional
 import logging
 import os
 import argparse
+import glob
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class BloomzHebrewFineTuner:
+class ModelConfig:
+    """Configuration class for different model architectures"""
+
+    @staticmethod
+    def get_model_config(model_name: str) -> Dict:
+        """Get model-specific configuration"""
+        # Base configuration
+        config = {
+            "trust_remote_code": True,  # Required for some models like Qwen
+            "padding_side": "right",
+            "use_fast_tokenizer": True
+        }
+
+        return config
+
+
+class GenericModelFineTuner:
     def __init__(
             self,
-            model_name: str = "bigscience/bloomz-560m",
-            output_dir: str = "bloomz-hebrew-finetuned",
+            model_name: str,
+            output_dir: str = "finetuned-model",
             max_length: int = 128,
+            model_config: Optional[Dict] = None
     ):
         self.model_name = model_name
         self.output_dir = output_dir
         self.max_length = max_length
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        logger.info(f"Using device: {self.device}")
+        # Get model-specific configuration
+        self.model_config = model_config or ModelConfig.get_model_config(model_name)
 
-        # Initialize tokenizer and model
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(
+        logger.info(f"Using device: {self.device}")
+        logger.info(f"Model configuration: {self.model_config}")
+
+        # Initialize tokenizer and model with specific configurations
+        self.tokenizer = AutoTokenizer.from_pretrained(
             self.model_name,
-            torch_dtype=torch.float32
+            trust_remote_code=self.model_config["trust_remote_code"],
+            use_fast=self.model_config["use_fast_tokenizer"]
         )
 
-        # Add padding token if it doesn't exist
+        self.model = AutoModelForCausalLM.from_pretrained(
+            self.model_name,
+            torch_dtype=torch.float32,
+            trust_remote_code=self.model_config["trust_remote_code"],
+            device_map="auto" if self.device == "cuda" else None,
+            **{k: v for k, v in self.model_config.items()
+               if k not in ["trust_remote_code", "use_fast_tokenizer", "padding_side"]}
+        )
+
+        # Handle tokenizer settings
+        self._setup_tokenizer()
+
+    def _setup_tokenizer(self):
+        """Setup tokenizer with proper padding token and settings"""
+        # Set padding side
+        self.tokenizer.padding_side = self.model_config["padding_side"]
+
+        # Handle padding token
         if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-            self.model.config.pad_token_id = self.model.config.eos_token_id
+            if "llama" in self.model_name.lower():
+                self.tokenizer.pad_token = self.tokenizer.eos_token
+                self.model.config.pad_token_id = self.model.config.eos_token_id
+            elif "qwen" in self.model_name.lower():
+                self.tokenizer.pad_token = '<|endoftext|>'
+                self.model.config.pad_token_id = self.tokenizer.pad_token_id
+            else:  # Default behavior (BLOOMZ and others)
+                self.tokenizer.pad_token = self.tokenizer.eos_token
+                self.model.config.pad_token_id = self.model.config.eos_token_id
 
     def load_texts_from_file(self, file_path: str) -> List[str]:
         """Load texts from a file, one sentence per line."""
@@ -52,15 +98,15 @@ class BloomzHebrewFineTuner:
         return texts
 
     def prepare_dataset(self, texts: List[str]) -> Dataset:
-        """Prepare the dataset for training."""
+        """Prepare the dataset for training with dynamic padding."""
         dataset_dict = {"text": texts}
         dataset = Dataset.from_dict(dataset_dict)
 
         def tokenize_function(examples: Dict) -> Dict:
             return self.tokenizer(
                 examples["text"],
+                padding=True,
                 truncation=True,
-                padding="max_length",
                 max_length=self.max_length,
                 return_tensors="pt"
             )
@@ -82,13 +128,15 @@ class BloomzHebrewFineTuner:
             learning_rate: float = 2e-5,
             warmup_steps: int = 500,
             logging_steps: int = 100,
+            resume_from_checkpoint: bool = False,
+            gradient_accumulation_steps: int = 1
     ):
         """Fine-tune the model on the provided texts."""
         # Prepare datasets
         train_dataset = self.prepare_dataset(train_texts)
         eval_dataset = self.prepare_dataset(eval_texts)
 
-        # Initialize training arguments
+        # Initialize training arguments with model-specific optimizations
         training_args = TrainingArguments(
             output_dir=self.output_dir,
             num_train_epochs=num_epochs,
@@ -97,13 +145,21 @@ class BloomzHebrewFineTuner:
             learning_rate=learning_rate,
             warmup_steps=warmup_steps,
             logging_steps=logging_steps,
+            eval_steps=logging_steps,
+            save_steps=logging_steps * 50,
+            gradient_accumulation_steps=gradient_accumulation_steps,
+            eval_accumulation_steps=gradient_accumulation_steps,
+            fp16=self.device == 'cuda',
+            logging_dir=os.path.join(self.output_dir, "logs"),
+            save_total_limit=3,
+            load_best_model_at_end=True,
             eval_strategy="steps",
             save_strategy="steps",
-            save_steps=1000,
-            load_best_model_at_end=True,
-            gradient_accumulation_steps=4,
-            fp16=self.device == "cuda",
-            logging_dir=os.path.join(self.output_dir, "logs"),
+            max_grad_norm=1.0,  # Add gradient clipping
+            weight_decay=0.01,
+            # Add model-specific training arguments
+            optim="adamw_torch" if "llama" in self.model_name.lower() else "adamw_hf",
+            lr_scheduler_type="cosine",
         )
 
         # Initialize data collator
@@ -121,9 +177,16 @@ class BloomzHebrewFineTuner:
             data_collator=data_collator,
         )
 
+        # Find latest checkpoint if resuming
+        checkpoint_dir = None
+        if resume_from_checkpoint:
+            checkpoint_dirs = glob.glob(os.path.join(self.output_dir, "checkpoint-*"))
+            if checkpoint_dirs:
+                checkpoint_dir = max(checkpoint_dirs, key=lambda x: int(x.split("-")[-1]))
+                logger.info(f"Resuming from checkpoint: {checkpoint_dir}")
+
         # Start training
-        logger.info("Starting training...")
-        trainer.train()
+        trainer.train(resume_from_checkpoint=checkpoint_dir)
 
         # Save the final model
         logger.info(f"Saving model to {self.output_dir}")
@@ -132,23 +195,27 @@ class BloomzHebrewFineTuner:
 
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description='Fine-tune BLOOMZ model on Hebrew text')
+    parser = argparse.ArgumentParser(description='Fine-tune language models')
     parser.add_argument('--train-file', type=str, required=True,
                         help='Path to training data file (one sentence per line)')
     parser.add_argument('--eval-file', type=str, required=True,
                         help='Path to evaluation data file (one sentence per line)')
-    parser.add_argument('--model-name', type=str, default="bigscience/bloomz-560m",
+    parser.add_argument('--model-name', type=str, required=True,
                         help='Name or path of the base model')
-    parser.add_argument('--output-dir', type=str, default="bloomz-hebrew-finetuned",
+    parser.add_argument('--output-dir', type=str, default="finetuned-model",
                         help='Directory to save the fine-tuned model')
     parser.add_argument('--batch-size', type=int, default=8,
                         help='Training batch size')
-    parser.add_argument('--num-epochs', type=int, default=5,
+    parser.add_argument('--gradient-accumulation-steps', type=int, default=1,
+                        help='Number of steps for gradient accumulation')
+    parser.add_argument('--num-epochs', type=int, default=3,
                         help='Number of training epochs')
     parser.add_argument('--learning-rate', type=float, default=2e-5,
                         help='Learning rate')
     parser.add_argument('--max-length', type=int, default=128,
                         help='Maximum sequence length')
+    parser.add_argument('--resume-from-checkpoint', action='store_true',
+                        help='Resume training from the latest checkpoint if available')
     return parser.parse_args()
 
 
@@ -156,13 +223,13 @@ if __name__ == "__main__":
     args = parse_arguments()
 
     # Initialize fine-tuner
-    fine_tuner = BloomzHebrewFineTuner(
+    fine_tuner = GenericModelFineTuner(
         model_name=args.model_name,
         output_dir=args.output_dir,
         max_length=args.max_length
     )
 
-    # Load texts from files
+    # Load texts
     train_texts = fine_tuner.load_texts_from_file(args.train_file)
     eval_texts = fine_tuner.load_texts_from_file(args.eval_file)
 
@@ -172,5 +239,7 @@ if __name__ == "__main__":
         eval_texts=eval_texts,
         batch_size=args.batch_size,
         num_epochs=args.num_epochs,
-        learning_rate=args.learning_rate
+        learning_rate=args.learning_rate,
+        resume_from_checkpoint=args.resume_from_checkpoint,
+        gradient_accumulation_steps=args.gradient_accumulation_steps
     )
