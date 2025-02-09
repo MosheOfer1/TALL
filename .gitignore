@@ -159,3 +159,5 @@ cython_debug/
 /finetuned-models
 /src/prompt_tuning/llama_word_gen_model
 /src/prompt_tuning/llama_model_176k
+/finetuned-models-checkpoints
+/models-checkpoints

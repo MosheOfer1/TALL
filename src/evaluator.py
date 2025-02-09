@@ -5,7 +5,7 @@ import pandas as pd
 import logging
 
 from peft import PeftConfig, PeftModel
-from transformers import AutoTokenizer, AutoModelForCausalLM, MarianTokenizer, MarianMTModel
+from transformers import AutoTokenizer, AutoModelForCausalLM, MarianTokenizer, MarianMTModel, BitsAndBytesConfig
 from typing import List
 from pathlib import Path
 import csv
@@ -218,26 +218,53 @@ class SoftPromptApproach(BaseCompletionApproach):
 
 
 class FineTunedHebrewApproach(BaseCompletionApproach):
-    def __init__(self, checkpoint_path: str, device: str, base_model_name: str = "bigscience/bloomz-560m"):
+    def __init__(self, checkpoint_path: str, device: str, base_model_name: str = "bigscience/bloomz-560m", model_type: str = "default"):
         """
-        Initialize the fine-tuned Hebrew approach using the checkpoint from BLOOMZ fine-tuning.
+        Initialize the fine-tuned Hebrew approach using various model types.
 
         Args:
             checkpoint_path: Path to the fine-tuned model checkpoint
             device: Device to run the model on ('cuda' or 'cpu')
             base_model_name: Name of the base model to get the tokenizer from
+            model_type: Type of model ('llama', 'peft', or 'default')
         """
         self.device = device
+        self.model_type = model_type
 
-        # Load tokenizer from the base model
-        self.tokenizer = AutoTokenizer.from_pretrained(base_model_name)
-
-        # Load the fine-tuned model
-        self.model = AutoModelForCausalLM.from_pretrained(
-            checkpoint_path,
-            torch_dtype=torch.float32,  # Use float32 to avoid FP16 issues
-            local_files_only=True  # Ensure it doesn't try to download
-        ).to(device)
+        # Load tokenizer based on model type
+        if model_type == "llama":
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                base_model_name,
+                trust_remote_code=True
+            )
+            # Configure BitsAndBytes for Llama
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=False
+            )
+            # Load the Llama model
+            self.model = AutoModelForCausalLM.from_pretrained(
+                checkpoint_path,
+                device_map="auto",
+                quantization_config=bnb_config,
+                trust_remote_code=True
+            ).to(device)
+        elif model_type == "peft":
+            # Load PEFT model
+            peft_config = PeftConfig.from_pretrained(checkpoint_path)
+            self.tokenizer = AutoTokenizer.from_pretrained(peft_config.base_model_name_or_path)
+            base_model = AutoModelForCausalLM.from_pretrained(peft_config.base_model_name_or_path)
+            self.model = PeftModel.from_pretrained(base_model, checkpoint_path).to(device)
+        else:
+            # Default loading behavior for other models
+            self.tokenizer = AutoTokenizer.from_pretrained(base_model_name)
+            self.model = AutoModelForCausalLM.from_pretrained(
+                checkpoint_path,
+                torch_dtype=torch.float32,
+                local_files_only=True
+            ).to(device)
 
         # Add padding token if it doesn't exist
         if self.tokenizer.pad_token is None:
@@ -256,7 +283,7 @@ class FineTunedHebrewApproach(BaseCompletionApproach):
         # Prepare input for the model
         inputs = self.tokenizer(truncated_sentence, return_tensors="pt").to(self.device)
 
-        # Generate completion
+        # Configure generation parameters based on model type
         generation_config = {
             "max_new_tokens": 10,
             "do_sample": True,
@@ -265,6 +292,7 @@ class FineTunedHebrewApproach(BaseCompletionApproach):
             "eos_token_id": self.tokenizer.encode(" ")[0],  # Use space as EOS token
         }
 
+        # Generate completion
         outputs = self.model.generate(**inputs, **generation_config)
         completion = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
 
@@ -281,7 +309,7 @@ class FineTunedHebrewApproach(BaseCompletionApproach):
             predicted_word=predicted_word,
             actual_word=actual_word,
             is_correct=predicted_word == actual_word,
-            approach_name="finetuned_hebrew"
+            approach_name=f"finetuned_hebrew_{self.model_type}"
         )
 
 class CustomModelApproach(BaseCompletionApproach):
