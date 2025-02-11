@@ -1,5 +1,7 @@
 import argparse
 import os
+import traceback
+
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 import torch
@@ -160,7 +162,7 @@ def main():
                         help="Name or path of the Hebrew-English model")
     parser.add_argument("--en-he-model", type=str, default="Helsinki-NLP/opus-mt-en-he",
                         help="Name or path of the English-Hebrew model")
-    parser.add_argument("--llm-model", type=str, default="facebook/opt-350m",
+    parser.add_argument("--llm-model", type=str, default="bigscience/bloomz-560m",
                         help="Name or path of the LLM model")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu",
                         help="Device to use for training (cuda or cpu)")

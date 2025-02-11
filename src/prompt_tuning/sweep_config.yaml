@@ -1,0 +1,26 @@
+program: qwen_soft_prompt.py
+method: bayes
+metric:
+  name: avg_epoch_loss
+  goal: minimize
+parameters:
+  learning_rate:
+    distribution: uniform
+    min: 5e-5
+    max: 8e-3
+  batch_size:
+    value: 16
+  prompt_length:
+    values: [10, 20, 30]
+  num_epochs:
+    value: 1
+  max_input_length:
+    value: 128
+  max_target_length:
+    value: 32
+  logging_steps:
+    value: 50
+  warmup_steps:
+    value: 100
+  csv_file:
+    value: ../../data_sets/ynet_256k_matches_processed.csv

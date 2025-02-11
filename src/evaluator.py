@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from tqdm import tqdm
 
 from model import CustomLLM
+from prompt_tuning.qwen_soft_prompt import SoftPromptTuningModel
 
 
 @dataclass
@@ -155,54 +156,95 @@ class NaiveApproach(BaseCompletionApproach):
 
 class SoftPromptApproach(BaseCompletionApproach):
     def __init__(self, he_to_en_model: TranslationModel,
-                 en_to_he_model: TranslationModel, model_path: str, device: str):
-        # Load the PEFT configuration
+                 en_to_he_model: TranslationModel,
+                 model_path: str,
+                 device: str,
+                 base_model_name: str,
+                 prompt_type: str = "peft"):
+        """
+        Initialize the soft prompt approach using either PEFT or traditional soft prompts.
+
+        Args:
+            he_to_en_model: Hebrew to English translation model
+            en_to_he_model: English to Hebrew translation model
+            model_path: Path to the model (PEFT or soft prompt checkpoint)
+            device: Device to run on
+            base_model_name: Name of the base model to use
+            prompt_type: Type of soft prompt ("peft" or "traditional")
+        """
         self.device = device
         self.he_to_en = he_to_en_model
         self.en_to_he = en_to_he_model
+        self.prompt_type = prompt_type
 
-        peft_config = PeftConfig.from_pretrained(model_path)
+        if prompt_type == "peft":
+            # Load PEFT model
+            peft_config = PeftConfig.from_pretrained(model_path)
+            self.tokenizer = AutoTokenizer.from_pretrained(peft_config.base_model_name_or_path)
+            base_model = AutoModelForCausalLM.from_pretrained(peft_config.base_model_name_or_path)
+            self.model = PeftModel.from_pretrained(base_model, model_path).to(device)
 
-        # Load base model and tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(peft_config.base_model_name_or_path)
-        base_model = AutoModelForCausalLM.from_pretrained(peft_config.base_model_name_or_path)
+        elif prompt_type == "traditional":
+            # Load traditional soft prompt model using the provided base model name
+            self.tokenizer = AutoTokenizer.from_pretrained(base_model_name)
+            base_model = AutoModelForCausalLM.from_pretrained(base_model_name)
+            self.model = SoftPromptTuningModel.load_soft_prompt(
+                base_model, model_path
+            ).to(device)
+        else:
+            raise ValueError(f"Unsupported prompt type: {prompt_type}")
 
-        # Load the PEFT model
-        self.model = PeftModel.from_pretrained(base_model, model_path).to(device)
-        self.model.eval()  # Set to evaluation mode
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        self.model.eval()
 
     def process_sentence(self, sentence: str) -> ModelOutput:
-        # Split sentence to get the last word
-        sentence = sentence.replace(".","")
+        # Split sentence and process
+        sentence = sentence.replace(".", "")
         words = sentence.split()
         truncated_sentence = " ".join(words[:-1])
         actual_word = words[-1]
 
         # Translate to English
-        english_translation = self.he_to_en.translate(truncated_sentence).replace(".","")
+        english_translation = self.he_to_en.translate(truncated_sentence).replace(".", "")
 
-        # Prepare input for soft prompt model
+        # Prepare input
         inputs = self.tokenizer(english_translation, return_tensors="pt").to(self.device)
 
-        # Generate completion with specific parameters for single-word generation
+        # Generate completion
         generation_config = {
             "max_new_tokens": 10,
             "do_sample": True,
             "temperature": 0.7,
-            "pad_token_id": self.tokenizer.pad_token_id if self.tokenizer.pad_token_id else self.tokenizer.eos_token_id,
-            "eos_token_id": self.tokenizer.encode(" ")[0],  # Use space as EOS token
+            "pad_token_id": self.tokenizer.pad_token_id,
+            "eos_token_id": self.tokenizer.encode(" ")[0],
         }
 
+        # Generate and handle completion differently based on prompt type
         outputs = self.model.generate(**inputs, **generation_config)
         completion = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-        # Extract the predicted completion
-        english_completion = completion[len(english_translation):].strip().split()[0]
-        english_full_sentence = f"{english_translation} {english_completion}"
+        if self.prompt_type == "peft":
+            # For PEFT, extract everything after the input (original behavior)
+            english_completion = completion[len(english_translation):].strip().split()[0]
+            english_full_sentence = f"{english_translation} {english_completion}"
+        else:  # traditional
+            # For traditional, take the first word of the completion
+            try:
+                completion_words = completion.strip().split()
+                if completion_words:
+                    english_completion = completion_words[0]
+                else:
+                    english_completion = ""
+            except Exception as e:
+                print(f"Error processing completion: {str(e)}")
+                english_completion = ""
+            english_full_sentence = f"{english_translation} {english_completion}"
 
         # Translate back to Hebrew
-        final_translation = self.en_to_he.translate(english_full_sentence).replace(".","")
-        predicted_word = final_translation.split()[-1].replace(",","").replace(".","")
+        final_translation = self.en_to_he.translate(english_full_sentence).replace(".", "")
+        predicted_word = final_translation.split()[-1].replace(",", "").replace(".", "")
 
         return ModelOutput(
             original_sentence=sentence,
@@ -213,9 +255,8 @@ class SoftPromptApproach(BaseCompletionApproach):
             predicted_word=predicted_word,
             actual_word=actual_word,
             is_correct=predicted_word == actual_word,
-            approach_name="soft_prompt"
+            approach_name=f"soft_prompt_{self.prompt_type}"
         )
-
 
 class FineTunedHebrewApproach(BaseCompletionApproach):
     def __init__(self, checkpoint_path: str, device: str, base_model_name: str = "bigscience/bloomz-560m", model_type: str = "default"):
@@ -438,9 +479,12 @@ def parse_args():
     parser.add_argument('--llm-model', default='bigscience/bloomz-560m',
                         help='Base LLM model name')
 
-    # Make these optional instead of required
     parser.add_argument('--soft-prompt-model',
-                        help='Path to the soft prompt model')
+                        help='Path to the soft prompt model (PEFT or traditional)')
+    parser.add_argument('--soft-prompt-type',
+                        choices=['peft', 'traditional'],
+                        default='peft',
+                        help='Type of soft prompt to use')
     parser.add_argument('--custom-model',
                         help='Path to the custom model checkpoint')
     parser.add_argument('--finetuned-model',
@@ -484,7 +528,14 @@ def get_enabled_approaches(args, he_to_en, en_to_he):
         approaches.append(NaiveApproach(he_to_en, en_to_he, args.llm_model, args.device))
 
     if args.use_soft_prompt and args.soft_prompt_model:
-        approaches.append(SoftPromptApproach(he_to_en, en_to_he, args.soft_prompt_model, args.device))
+        approaches.append(SoftPromptApproach(
+            he_to_en,
+            en_to_he,
+            args.soft_prompt_model,
+            args.device,
+            base_model_name=args.llm_model,
+            prompt_type=args.soft_prompt_type
+        ))
     elif args.use_soft_prompt:
         print("Soft Prompt approach enabled but no model path provided. Skipping.")
 
